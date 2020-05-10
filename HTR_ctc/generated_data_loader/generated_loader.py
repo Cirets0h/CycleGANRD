@@ -24,7 +24,7 @@ class GeneratedLoader(Dataset):
         if isfile(save_file) is False:
             print('Creating:  ' + save_file)
             data = []
-            i = 0
+            image_count = 0
             for image_name in data_image_names:
                 t0 = time.time()
                 if image_name[-1].lower() == 'g':  # to avoid e.g. thumbs.db files
@@ -36,13 +36,12 @@ class GeneratedLoader(Dataset):
                         image = cv2.normalize(cv2.imread(os.path.join(data_path, image_name)), None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
                     image = getRandomCrop(image, image_name)
-                    word_array, info_array = cropWords(image, image_name.rsplit('.')[0] + '-crop')
+                    word_array, info_array = cropWords(image, image_name.rsplit('.')[0] + '-crop', '/home/manuel/CycleGANRD/HTR_ctc/data/generated/')
                     for i in range(0, len(word_array)):
                         data.append([word_array[i].copy(), info_array[i]])
 
-                i +=1
-
-                if i % (len(data_image_names)//10) == 0:
+                image_count += 1
+                if image_count % (len(data_image_names)//10) == 1:
                     print(str(i) + '/' + str(len(data_image_names)))
             torch.save(data, save_file)
             print('Finished:  ' + save_file)
@@ -70,7 +69,9 @@ class GeneratedLoader(Dataset):
             nwidth = int(np.random.uniform(.8, 1.2) * img.shape[1] * nheight / img.shape[0])
 
         img = image_resize(img, height=nheight-16, width=nwidth)
+
        # img = centered(img, (nheight, int(1.2 * nwidth) + 32))
         img = torch.Tensor(img).float().unsqueeze(0)
+        img += torch.randn(img.size()) * 0.001 + 0.
 
         return img, transcr

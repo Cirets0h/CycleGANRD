@@ -77,7 +77,7 @@ def getWordsInCrop(name, x0, y0, x1, y1, scale_factor = 1):
     csvCrop.close()
     return hasWord
 
-def cropWords(image, name):
+def cropWords(image, name, source):
     #print(name)
     if torch.is_tensor(image):
         image = image.detach().squeeze(0).transpose(0,2).transpose(0,1).cpu().numpy()
@@ -86,7 +86,7 @@ def cropWords(image, name):
 
     word_array = []
     info_array = []
-    with open('/home/manuel/CycleGANRD/HTR_ctc/data/generated/csv-crop/' + name + '.csv') as csvfile:
+    with open(source + 'csv-crop/' + name + '.csv') as csvfile:
         reader = csv.DictReader(csvfile, delimiter=';')
         for row in reader:
             # print(row['y0'])
@@ -114,14 +114,15 @@ def getRandomCrop(image, image_name):
     boundingBox_size = 256
     hasWords = False
     while True:
-        rand_x = random.randint(1062, 2510)  # the text of the document is between 1062 and 2766 (-256 = 2510) width
-        rand_y = random.randint(1029, 4111)  # and between 1029 and 4367 (-256 = 4111) height
+        rand_x = random.randint(600,
+                                2154)  # the text of the document is between 600 and 2154 (-256 = 2510) width
+        rand_y = random.randint(582, 2937)
         # print('x: ' + str(rand_x) + ', y: ' + str(rand_y))
         #image = tf.image.crop_to_bounding_box(image, rand_y, rand_x, boundingBox_size, boundingBox_size)
         croppedImage = image[rand_y: rand_y + boundingBox_size, rand_x: rand_x + boundingBox_size,:]
         hasWords = getWordsInCrop(image_name.rsplit('.')[0], rand_x, rand_y, rand_x + boundingBox_size,
                                        rand_y + boundingBox_size)
-        if np.mean(croppedImage) < 250 and hasWords:  # recrop if picture is too white (not enough text)
+        if np.mean(croppedImage) < 0.9 and hasWords:  # recrop if picture is too white (not enough text)
             break
 
     return croppedImage

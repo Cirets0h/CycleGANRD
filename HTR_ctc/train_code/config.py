@@ -13,6 +13,6 @@ iter_size = 16
 # fixed_size
 
 model_path = '/home/manuel/CycleGANRD/HTR_ctc/saved_models/'
-save_model_name = 'crnn_' + data_name + '.pt'
+save_model_name = 'crnn_' + data_name + '2.pt'
 #load_model_name = None
 load_model_name = 'crnn_' + data_name + '.pt'

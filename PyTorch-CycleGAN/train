@@ -134,14 +134,10 @@ for epoch in range(opt.epoch, opt.n_epochs):
         pred_fake = netD_A(fake_A)
         loss_GAN_B2A = criterion_GAN(pred_fake, target_real)
 
-        # Cycle loss torch.randn(x.size()) * 0.001 + 0. # Gaussian Noise
-        with torch.no_grad():
-            fake_B_noise = fake_B.detach().cpu()  + (torch.randn(fake_B.cpu().size()) * 0.001) + 0.
-        recovered_A = netG_B2A(fake_B_noise.cuda()) # Gaussian Noise)
+        recovered_A = netG_B2A(fake_B)
         loss_cycle_ABA = criterion_cycle(recovered_A, real_A)*7.0
-        with torch.no_grad():
-            fake_A_noise = fake_A.detach().cpu() + (torch.randn(fake_A.cpu().size()) * 0.001) + 0.
-        recovered_B = netG_A2B(fake_A_noise.cuda())
+
+        recovered_B = netG_A2B(fake_A)
         loss_cycle_BAB = criterion_cycle(recovered_B, real_B)*7.0
 
         # if fake_B.cpu().detach().numpy().min < 0:
@@ -151,16 +147,14 @@ for epoch in range(opt.epoch, opt.n_epochs):
         rd_loss = 0
         name_A = str(batch['A_name'][0]).rsplit('/')
         name_A = name_A[len(name_A) - 1].rsplit('.')[0]
-        word_array, info_array = cropWords(real_A, name_A)
+        word_array, info_array = cropWords(fake_B, name_A, '/home/manuel/CycleGANRD/PyTorch-CycleGAN/datasets/cropped_data/')
         for i in range(0, len(word_array)):
-            cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/word_' + str(i) + '.png', word_array[i]*255)
+            #cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/word_' + str(i) + '.png', word_array[i]*255)
             tens = resizeImg(word_array[i],(128, None)).transpose(1, 3).transpose(2, 3)
-            loss, _ = rd.train(tens, (info_array[i].lower(),))
+            loss, _ = rd.train(tens, (info_array[i],))
             rd_loss += loss
 
-        rd_last = 0
         rd_loss = rd_loss/len(word_array) * 2.5
-        rd_last = rd_loss
 
 
         # Total loss
@@ -208,19 +202,26 @@ for epoch in range(opt.epoch, opt.n_epochs):
         optimizer_D_B.step()
         ###################################
         count += 1
-        if count == 2:
-            vis = np.concatenate((real_A.cpu().numpy(), fake_B.cpu().numpy()), axis=1)
-            #cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/Diff_realA_fakeB_' + str(epoch) + '.png', vis)
 
+        if count == len(dataloader) or (epoch < 5 and count % (len(dataloader) // 10) == 0):
+            aba = np.concatenate((real_A.detach().squeeze(0).permute(1,2,0).cpu().numpy(), fake_B.detach().squeeze(0).permute(1,2,0).cpu().numpy(), recovered_A.detach().squeeze(0).permute(1,2,0).cpu().numpy()), axis=1) *255
+            bab = np.concatenate((real_B.detach().squeeze(0).permute(1, 2, 0).cpu().numpy(),
+                                  fake_A.detach().squeeze(0).permute(1, 2, 0).cpu().numpy(),
+                                  recovered_B.detach().squeeze(0).permute(1, 2, 0).cpu().numpy()), axis=1) * 255
+            cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/results/ABA_' + str(epoch) + '_' + str(count) + '.png', aba)
+            cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/results/BAB_' + str(epoch) + '_' + str(count) + '.png', bab)
+
+            # Progress report (http://localhos
             # Progress report (http://localhost:8097)
         if count % 5 == 1:
             logger.log({'loss_G': loss_G, 'loss_G_identity': (loss_identity_A + loss_identity_B), 'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A),
-                    'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB), 'loss_D': (loss_D_A + loss_D_B), 'loss_RD': rd_loss}, #
+                    'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB), 'loss_D': (loss_D_A + loss_D_B), 'loss_RD': rd_loss}, # , 'loss_RD': rd_loss
                     images={'real_A': real_A, 'real_B': real_B, 'fake_A': fake_A, 'fake_B': fake_B, 'recovered_A': recovered_A, 'recovered_B': recovered_B})
         else:
             logger.log({'loss_G': loss_G, 'loss_G_identity': (loss_identity_A + loss_identity_B),
                         'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A),
                         'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB), 'loss_D': (loss_D_A + loss_D_B), 'loss_RD': rd_loss} , images = {})
+
 
 
     # Update learning rates
@@ -233,5 +234,6 @@ for epoch in range(opt.epoch, opt.n_epochs):
     torch.save(netG_B2A.state_dict(), '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/netG_B2A.pth')
     torch.save(netD_A.state_dict(), '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/netD_A.pth')
     torch.save(netD_B.state_dict(), '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/netD_B.pth')
+    rd.saveModel('rd.pt')
 ###################################
 

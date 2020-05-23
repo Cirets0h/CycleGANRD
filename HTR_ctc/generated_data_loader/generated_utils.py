@@ -1,11 +1,15 @@
 import csv
 import math
 import random
+import time
+
 import numpy as np
 import torch
 import cv2
 from HTR_ctc.utils.auxilary_functions import image_resize
+from .generated_config import *
 
+bounding_box = 256
 # Picture crop:
 #  __________
 # |x0y0     |
@@ -13,11 +17,11 @@ from HTR_ctc.utils.auxilary_functions import image_resize
 # |    x1,y1|
 #  _________
 
-def getWordsInCrop(name, x0, y0, x1, y1, scale_factor = 1):
+def getWordsInCrop(name, source, x0, y0, x1, y1):
     delimiter = ';'
-    scope_tolerance = 256 * 0.03 # normally try 0.05
+    scope_tolerance = bounding_box * 0.03 # normally try 0.05
     # print('x0: ' + str(x0) + ' y0: ' + str(y0) + 'x1: ' + str(x1) + ' y1: ' + str(y1))
-    csvCrop = open('/home/manuel/CycleGANRD/HTR_ctc/data/generated/csv-crop/' + name + '-crop.csv', 'w+')
+    csvCrop = open(source + 'csv-crop/' + name + '-crop.csv', 'w+')
     word = ""
     pre = ""
     post = ""
@@ -25,7 +29,7 @@ def getWordsInCrop(name, x0, y0, x1, y1, scale_factor = 1):
     x0_new = 0
     y0_new = 0
     x1_new = 0
-    y1_new = 0
+    y1_new = bounding_box
     wordOver = False
     fix = False
     hasWord = False # Variable that is returned determinating if the crop contain a word (It could also be a crop thats is only a lettrine)
@@ -35,7 +39,7 @@ def getWordsInCrop(name, x0, y0, x1, y1, scale_factor = 1):
         for row in reader:
             wordOver = False
             fix = False
-            if row['char'] == ' ' or y1_new > float(row['y1']):  # word over
+            if row['char'] == ' ' or y1_new < float(row['y1']):  # word over
                 if (word != "" or pre != "" or post != "") and pfloat(x0_new - x0) != 256 and pfloat(x1_new - x0) != 0: # while the last two and statements may seem obsolute, otherwise there is a bug where a random M occurs in the csv that has no length
                     hasWord = True
                     csvCrop.write(
@@ -49,8 +53,9 @@ def getWordsInCrop(name, x0, y0, x1, y1, scale_factor = 1):
                 x0_new = 0
                 y0_new = 0
                 x1_new = 0
-                y1_new = 0
-                wordOver = True
+                y1_new = bounding_box
+                if row['char'] == ' ':
+                    wordOver = True
             if x0 - scope_tolerance < float(row['x0']) and y0 - scope_tolerance < float(row['y0']) and x1 + scope_tolerance > float(row['x1']) and y1 + scope_tolerance > float(row['y1']) and not wordOver:
                 if x0_new == 0:
                     x0_new = float(row['x0'])
@@ -90,7 +95,8 @@ def cropWords(image, name, source):
         reader = csv.DictReader(csvfile, delimiter=';')
         for row in reader:
             # print(row['y0'])
-            output = image[math.floor(float(row['y0'])) : math.ceil(float(row['y1'])), math.floor(float(row['x0'])) : math.ceil(float(row['x1'])), : ]
+            #todo: delete + 20 with y1
+            output = image[math.floor(float(row['y0'])) : math.ceil(float(row['y1']) + 20), math.floor(float(row['x0'])) : math.ceil(float(row['x1'])), : ]
             word_array.append(output)
             info_array.append(row['pre'] + row['word'] + row['post'])
             # todo: insert below code and adjust Reading Discriminator for pre and postfixes
@@ -103,14 +109,14 @@ def cropWords(image, name, source):
 def pfloat(number): # positive float
     if number <= 0:
         return 0
-    elif number >= 256:
-        return 256
+    elif number >= bounding_box:
+        return bounding_box
     else:
         return number
 
 
 
-def getRandomCrop(image, image_name):
+def getRandomCrop(image, image_name, source):
     boundingBox_size = 256
     hasWords = False
     while True:
@@ -120,9 +126,9 @@ def getRandomCrop(image, image_name):
         # print('x: ' + str(rand_x) + ', y: ' + str(rand_y))
         #image = tf.image.crop_to_bounding_box(image, rand_y, rand_x, boundingBox_size, boundingBox_size)
         croppedImage = image[rand_y: rand_y + boundingBox_size, rand_x: rand_x + boundingBox_size,:]
-        hasWords = getWordsInCrop(image_name.rsplit('.')[0], rand_x, rand_y, rand_x + boundingBox_size,
+        hasWords = getWordsInCrop(image_name.rsplit('.')[0], source, rand_x, rand_y, rand_x + boundingBox_size,
                                        rand_y + boundingBox_size)
-        if np.mean(croppedImage) < 0.9 and hasWords:  # recrop if picture is too white (not enough text)
+        if np.mean(croppedImage) < 230 and hasWords:  # recrop if picture is too white (not enough text)
             break
 
     return croppedImage
@@ -144,4 +150,35 @@ def resizeImg(img, fixed_size):
         img = torch.Tensor(img).float().unsqueeze(0)
         return img
 
+def generateCrops(nr_of_channels, source, just_generate = False, crop_path = 'train/A/', normalize=True):
+    print('Creating new crops')
+    data = []
+    image_count = 0
+    for image_name in data_image_names:
+        if image_name[-1].lower() == 'g':  # to avoid e.g. thumbs.db files
+            if nr_of_channels == 1:  # Gray scale image -> MR image
+                image = cv2.imread(os.path.join(data_path, image_name), cv2.IMREAD_GRAYSCALE)
+                # todo: change data loader to delete one dimension in black and white, then delete squeeze in get
+                image = image[:, :, np.newaxis]
+            else:  # RGB image -> street view
+                image = cv2.imread(os.path.join(data_path, image_name))
 
+            if not just_generate:
+                image = cv2.normalize(image, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+            image = getRandomCrop(image, image_name, source)
+            if just_generate:
+                cv2.imwrite(source + crop_path + image_name.rsplit('.')[0] + '-crop.png', image)
+            else:
+                word_array, info_array = cropWords(image, image_name.rsplit('.')[0] + '-crop',
+                                                   source)
+                for i in range(0, len(word_array)):
+                    data.append([word_array[i].copy(), info_array[i]])
+            t3 = time.time()
+        image_count += 1
+        if image_count % (len(data_image_names) // 10) == 1:
+            print(str(image_count) + '/' + str(len(data_image_names)))
+
+    print('Finished crops')
+    return data
+    

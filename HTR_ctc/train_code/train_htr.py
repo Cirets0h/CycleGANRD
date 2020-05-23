@@ -101,7 +101,6 @@ if __name__ == "__main__":
     for epoch in range(1, max_epochs + 1):
 
         rd.train_on_Dataloader(epoch, train_loader, test_set, scheduler)
-
         if epoch % 1 == 0:
             logger.info('Saving net after %d epochs', epoch)
             rd.saveModel(save_model_name)

@@ -7,6 +7,7 @@ from torch.autograd import Variable
 from HTR_ctc.utils.auxilary_functions import torch_augm
 from HTR_ctc.train_code.config import *
 import editdistance
+import matplotlib.pyplot as plt
 import cv2
 
 logger = logging.getLogger('Reading Discriminator')
@@ -65,9 +66,10 @@ class ReadingDiscriminator():
         img = Variable(img.to(device))
         # cuda augm - alternatively for cpu use it on dataloader
         img = torch_augm(img)
-        # np_img = img.detach().squeeze(0).permute(1,2,0).cpu().numpy()
-        # cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/test2.png', np_img*255)
+        np_img = img.detach().squeeze(0).permute(1,2,0).cpu().numpy()
+        cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/test2.png', np_img*255)
         output = self.net(img)
+
 
         act_lens = torch.IntTensor(img.size(0) * [output.size(0)])
         try:
@@ -81,9 +83,9 @@ class ReadingDiscriminator():
 
         loss_val = self.loss(output.cpu(), labels, act_lens, label_lens)
 
-        if loss_val.data > 1.5:
-            np_img = img.detach().squeeze(0).permute(1,2,0).cpu().numpy()
-            cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/test2.png', np_img*255)
+        if loss_val > 5:
+            cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/test1.png', np_img * 255)
+
         loss_val.backward()
 
 
@@ -92,7 +94,7 @@ class ReadingDiscriminator():
             self.optimizer.step()
             self.optimizer.zero_grad()
 
-        return loss_val.data, output
+        return loss_val, output
     
     def getResult(self, img):
         self.net.eval()

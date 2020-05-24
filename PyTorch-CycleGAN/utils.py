@@ -32,8 +32,7 @@ class Logger():
         self.mean_period += (time.time() - self.prev_time)
         self.prev_time = time.time()
 
-        sys.stdout.write('\rEpoch %03d/%03d [%04d/%04d] -- ' % (self.epoch, self.n_epochs, self.batch, self.batches_epoch))
-
+        sys.stdout.write('\r Epoch %03d/%03d [%04d/%04d] -- ' % (self.epoch, self.n_epochs, self.batch, self.batches_epoch) + ' ')
         for i, loss_name in enumerate(losses.keys()):
             if loss_name not in self.losses:
                 self.losses[loss_name] = losses[loss_name].data
@@ -45,10 +44,13 @@ class Logger():
             else:
                 sys.stdout.write('%s: %.4f | ' % (loss_name, self.losses[loss_name]/self.batch))
 
+            sys.stdout.flush()
+
         batches_done = self.batches_epoch*(self.epoch - 1) + self.batch
         batches_left = self.batches_epoch*(self.n_epochs - self.epoch) + self.batches_epoch - self.batch 
         sys.stdout.write('ETA: %s' % (datetime.timedelta(seconds=batches_left*self.mean_period/batches_done)))
-
+        sys.stdout.flush()
+        
         # Draw images
         for image_name, tensor in images.items():
             if image_name not in self.image_windows:
@@ -71,6 +73,7 @@ class Logger():
             self.epoch += 1
             self.batch = 1
             sys.stdout.write('\n')
+            sys.stdout.flush()
         else:
             self.batch += 1
 

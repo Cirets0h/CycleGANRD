@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+
 import argparse
 import itertools
 
@@ -102,7 +103,7 @@ fake_B_buffer = ReplayBuffer()
 transforms_ = [ transforms.ToTensor()]
                 #transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5)),
                 #AddGaussianNoise(0., 0.001)
-#generateCrops(3, '/home/manuel/CycleGANRD/PyTorch-CycleGAN/datasets/cropped_data/', just_generate=True, crop_path='train/A/')
+generateCrops(3, '/home/manuel/CycleGANRD/PyTorch-CycleGAN/datasets/cropped_data/', just_generate=True, crop_path='train/A/')
 
 dataloader = DataLoader(ImageDataset(opt.dataroot, transforms_=transforms_, unaligned=True),
                         batch_size=opt.batchSize, shuffle=True, num_workers=opt.n_cpu)
@@ -152,26 +153,31 @@ for epoch in range(opt.epoch, opt.n_epochs):
         pred_fake = netD_A(fake_A)
         loss_GAN_B2A = criterion_GAN(pred_fake, target_real)
 
-        # testFakeB = cv2.imread('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/fakeB.png')
-        # testFakeB = torch.Tensor(testFakeB).unsqueeze(0).permute(0,3,1,2)
+
+        #here begins the binarization
         torch_zeros = torch.zeros(fake_B.size())
         torch_ones = torch.ones(fake_B.size())
+
+        #if pixel values are over 0.3, they get 0, otherwise 1
         fake_B_binary = torch.where(fake_B.cpu() > 0.3, torch_ones, torch_zeros)
+
+        #equalize all three channels so its only black and white
+        fake_B_binary_np = fake_B_binary.numpy()[0]
+        fake_B_binary_np = np.where(fake_B_binary_np[0] + fake_B_binary_np[1] + fake_B_binary_np[2] == 3, np.ones(fake_B_binary_np.shape), np.zeros(fake_B_binary_np.shape))
+        fake_B_binary = torch.Tensor(fake_B_binary_np).unsqueeze(0)
+
+        #noise
         fake_B_binary = fake_B_binary + torch.randn(fake_B_binary.size()) * 0.0001
         recovered_A = netG_B2A(fake_B_binary.cuda())
         np_img = fake_B_binary.detach().squeeze(0).permute(1, 2, 0).cpu().numpy()
         cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/recoveredA.png', np_img * 255)
-        # fakeRecovered_A = netG_B2A(testFakeB.cuda().float())
-        # np_img = fakeRecovered_A.detach().squeeze(0).permute(1, 2, 0).cpu().numpy()
-        # cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/recoveredAFake.png', np_img * 255)
+
         loss_cycle_ABA = criterion_cycle(recovered_A, real_A)*7.0
 
         recovered_B = netG_A2B(fake_A)
         loss_cycle_BAB = criterion_cycle(recovered_B, real_B)*7.0
 
-        # if fake_B.cpu().detach().numpy().min < 0:
-        #     print('Smaller as 0')
-        # Reading Discriminator
+
         rd_data = []
         rd_loss = 0
         name_A = str(batch['A_name'][0]).rsplit('/')

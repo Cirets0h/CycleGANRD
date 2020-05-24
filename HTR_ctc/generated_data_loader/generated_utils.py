@@ -10,6 +10,7 @@ from HTR_ctc.utils.auxilary_functions import image_resize
 from .generated_config import *
 
 bounding_box = 256
+delimiter = '$'
 # Picture crop:
 #  __________
 # |x0y0     |
@@ -18,7 +19,7 @@ bounding_box = 256
 #  _________
 
 def getWordsInCrop(name, source, x0, y0, x1, y1):
-    delimiter = ';'
+
     scope_tolerance = bounding_box * 0.03 # normally try 0.05
     # print('x0: ' + str(x0) + ' y0: ' + str(y0) + 'x1: ' + str(x1) + ' y1: ' + str(y1))
     csvCrop = open(source + 'csv-crop/' + name + '-crop.csv', 'w+')
@@ -33,9 +34,10 @@ def getWordsInCrop(name, source, x0, y0, x1, y1):
     wordOver = False
     fix = False
     hasWord = False # Variable that is returned determinating if the crop contain a word (It could also be a crop thats is only a lettrine)
-    csvCrop.write('word;x0;y0;x1;y1;y_scope_out;pre;post\n')
+    csvCrop.write(
+        'word' + delimiter + 'x0' + delimiter + 'y0' + delimiter + 'x1' + delimiter + 'y1' + delimiter + 'y_scope_out' + delimiter + 'pre' + delimiter + 'post\n')
     with open('/home/manuel/CycleGANRD/HTR_ctc/data/generated/csv/' + name + '.csv') as csvfile:
-        reader = csv.DictReader(csvfile, delimiter=';')
+        reader = csv.DictReader(csvfile, delimiter=delimiter)
         for row in reader:
             wordOver = False
             fix = False
@@ -92,7 +94,7 @@ def cropWords(image, name, source):
     word_array = []
     info_array = []
     with open(source + 'csv-crop/' + name + '.csv') as csvfile:
-        reader = csv.DictReader(csvfile, delimiter=';')
+        reader = csv.DictReader(csvfile, delimiter=delimiter)
         for row in reader:
             # print(row['y0'])
             #todo: delete + 20 with y1

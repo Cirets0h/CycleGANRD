@@ -64,7 +64,7 @@ identity_loss_factor_B = 4.0
 gan_loss_factor_A2B = 1.0
 cycle_loss_factor_B = 8.0
 rd_loss_factor_B = 2.5
-load_last_model = True
+load_last_model = False
 
 # Networks
 netG_A2B = Generator(opt.input_nc, opt.output_nc)
@@ -193,7 +193,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
         real_B_binary_np = real_B_binary.numpy()[0]
         real_B_binary_np = np.where(real_B_binary_np[0] + real_B_binary_np[1] + real_B_binary_np[2] == 3, np.ones(real_B_binary_np.shape), np.zeros(real_B_binary_np.shape))
         real_B_binary = torch.Tensor(real_B_binary_np).unsqueeze(0)
-        fake_A = netG_B2A(real_B)
+        fake_A = netG_B2A(real_B_binary.cuda())
 
         pred_fake = netD_A(fake_A)
         loss_GAN_B2A = criterion_GAN(pred_fake, target_real) * gan_loss_factor_B2A

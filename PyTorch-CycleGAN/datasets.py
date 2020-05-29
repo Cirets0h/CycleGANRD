@@ -12,6 +12,7 @@ class ImageDataset(Dataset):
     def __init__(self, root, transforms_=None, unaligned=False, mode='train'):
         self.transform = transforms.Compose(transforms_)
         self.unaligned = unaligned
+        
 
         self.files_A = sorted(glob.glob(os.path.join(root, '%s/A' % mode) + '/*.*'))
         self.files_B = sorted(glob.glob(os.path.join(root, '%s/B' % mode) + '/*.*'))
@@ -31,3 +32,6 @@ class ImageDataset(Dataset):
 
     def __len__(self):
         return max(len(self.files_A), len(self.files_B))
+    
+    def __lenA__(self):
+        return len(self.files_A)

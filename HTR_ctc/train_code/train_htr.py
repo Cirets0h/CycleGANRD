@@ -31,26 +31,28 @@ logger.info('--- Running PHOCNet Training ---')
 
 #cudnn.benchmark = True
 # prepare datset loader
-def InitDataset(data_set):
+def InitDataset(data_set, augment_factor = 0):
     if data_set == 'IAM':
         train_set = IAMLoader('train', level=data_name, fixed_size=(128, None))
         test_set = IAMLoader('test', level=data_name, fixed_size=(128, None))
     elif data_set == 'Generated':
-        train_set = GeneratedLoader(set='train', nr_of_channels=1, fixed_size=(128, None))
-        test_set = GeneratedLoader(set='test', nr_of_channels=1, fixed_size=(128, None))
+        train_set = GeneratedLoader(set='train', nr_of_channels=1, fixed_size=(128, None), augment_factor = augment_factor)
+        test_set = GeneratedLoader(set='test', nr_of_channels=1, fixed_size=(128, None), augment_factor = augment_factor)
     # augmentation using data sampler
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=8)
     test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=8)
     return train_set, test_set, train_loader, test_loader
 
 
-def InitStandardRD(nlr=1e-4):
+def InitStandardRD(wandb = None, nlr=1e-4):
     logger.info('Loading dataset')
 
 
     # load CNN
     logger.info('Preparing Net')
     net = CRNN(1, len(classes), 256)
+    if (wandb is not None):
+        wandb.watch(net)
     #net = HTRNet(cnn_cfg, rnn_cfg, len(classes))#
 
 
@@ -95,8 +97,12 @@ if __name__ == "__main__":
         logger.info('%s: %s', str(key), str(value))
     logger.info('###########################################')
 
-    _, test_set, train_loader, _ = InitDataset(args.data_set)
-    rd, scheduler = InitStandardRD(args.learning_rate)
+    _, test_set, train_loader, _ = InitDataset(args.data_set, augment_factor=2)
+    rd, scheduler = InitStandardRD(nlr=args.learning_rate)
+
+    img = cv2.normalize(cv2.imread('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/TestWords.png', cv2.IMREAD_GRAYSCALE), None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    img = torch.Tensor(img).float().unsqueeze(0)
+    print(rd.getResult(img))
     logger.info('Training:')
     for epoch in range(1, max_epochs + 1):
 

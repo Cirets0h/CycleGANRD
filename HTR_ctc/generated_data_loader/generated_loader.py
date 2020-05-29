@@ -8,6 +8,8 @@ import cv2
 from torch.utils.data import Dataset
 import time
 import torch
+import PIL
+from PIL import Image
 
 from skimage.transform import rotate, AffineTransform, warp
 from skimage.util import random_noise
@@ -61,20 +63,27 @@ class GeneratedLoader(Dataset):
         blur = np.random.uniform(.5, 2.0) * self.augment_factor
 
         #img = image_resize(img, height=2000, width=(int(2000/nheight)*nwidth))
-        img = rotate(img, angle=np.random.random_integers(-5, 5), mode='constant', cval= 1, resize=True) # rotating
+        img = rotate(img, angle=np.random.random_integers(-2, 2), mode='constant', cval= 1, resize=True) # rotating
         img = random_noise(img, var=noise ** 2) # adding noise
         img = gaussian(img, sigma=blur, multichannel=True) # blurring
 
 
-
         #end augmentation
 
+        img = img.resize(int((nheight-16)/2), int(nwidth/2), PIL.Image.NEAREST)
 
-        img = image_resize(img, height=nheight-16, width=nwidth)
+        img = img.resize((nheight-16, nwidth), PIL.Image.NEAREST)
+        #img = image_resize(img, height=nheight-16, width=nwidth)
+
+
+        # binarization
+        #img = img[:, :, np.newaxis]
+
+        #_, img = cv2.threshold(img, 0, 255, cv2.THRESH_OTSU)
 
         img = torch.Tensor(img).float().unsqueeze(0)
 
-
+        img = torch.where(img > 0.7, torch.ones(img.size()), torch.zeros(img.size()))
 
         return img, transcr
 

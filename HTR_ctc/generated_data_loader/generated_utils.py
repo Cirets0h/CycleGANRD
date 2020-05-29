@@ -97,8 +97,11 @@ def cropWords(image, name, source):
         reader = csv.DictReader(csvfile, delimiter=delimiter)
         for row in reader:
             # print(row['y0'])
-            #todo: delete + 20 with y1
-            output = image[math.floor(float(row['y0'])) : math.ceil(float(row['y1']) + 20), math.floor(float(row['x0'])) : math.ceil(float(row['x1'])), : ]
+            #todo: fix word positions in pdftocrop
+            y0 = math.floor(float(row['y0']) + -10)
+            if y0 < 0:
+                y0 = 0
+            output = image[y0 : math.ceil(float(row['y1']) + 10), math.floor(float(row['x0'])) : math.ceil(float(row['x1'])), : ]
             word_array.append(output)
             info_array.append(row['pre'] + row['word'] + row['post'])
             # todo: insert below code and adjust Reading Discriminator for pre and postfixes
@@ -161,12 +164,14 @@ def generateCrops(nr_of_channels, source, just_generate = False, crop_path = 'tr
             if nr_of_channels == 1:  # Gray scale image -> MR image
                 image = cv2.imread(os.path.join(data_path, image_name), cv2.IMREAD_GRAYSCALE)
                 # todo: change data loader to delete one dimension in black and white, then delete squeeze in get
+                if not just_generate:
+                    image = cv2.normalize(image, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
                 image = image[:, :, np.newaxis]
             else:  # RGB image -> street view
                 image = cv2.imread(os.path.join(data_path, image_name))
+                if not just_generate:
+                    image = cv2.normalize(image, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
-            if not just_generate:
-                image = cv2.normalize(image, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
             image = getRandomCrop(image, image_name, source)
             if just_generate:

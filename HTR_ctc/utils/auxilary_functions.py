@@ -66,7 +66,7 @@ def torch_augm(img):
     return img.detach()
 
 
-def image_resize(img, height=None, width=None):
+def image_resize(img, height=None, width=None, channel=0, order=1):
 
     if height is not None and width is None:
         scale = float(height) / float(img.shape[0])
@@ -75,8 +75,11 @@ def image_resize(img, height=None, width=None):
     if width is not None and height is None:
         scale = float(width) / float(img.shape[1])
         height = int(scale*img.shape[0])
+    if channel == 0:
+        img = resize(image=img, output_shape=(height, width), order=1).astype(np.float32)
+    else:
+        img = resize(image=img, output_shape=(channel, height, width), order=1).astype(np.float32)
 
-    img = resize(image=img, output_shape=(height, width)).astype(np.float32)
 
     return img
 

@@ -20,7 +20,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class ReadingDiscriminator():
 
-    def __init__(self, optimizer, net, loss, lr=1e-4, load_model_name=None):
+    def __init__(self, optimizer, net, loss, lr=1e-4, load_model_name=None, rd_low_loss_learn = False):
         self.optimizer = optimizer
         self.lr = lr
         self.net = net.to(device)
@@ -28,6 +28,7 @@ class ReadingDiscriminator():
         self.step_count = 0
         self.step_freq = 1
         self.loadModel(load_model_name)
+        self.rd_low_loss_learn = rd_low_loss_learn
         
 
     def train_on_Dataloader(self, epoch, train_loader, test_set, scheduler = None):
@@ -83,16 +84,15 @@ class ReadingDiscriminator():
 
         loss_val = self.loss(output.cpu(), labels, act_lens, label_lens)
 
-        if loss_val > 5:
-            cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/test1.png', np_img * 255)
-
-        loss_val.backward()
-
-
-        self.step_count += 1
-        if self.step_count % self.step_freq == self.step_freq - 1:
+        # if self.rd_low_loss_learn is true, the network only learns on a loss lower than 1
+        # if off it learns on everything
+        if not self.rd_low_loss_learn or loss_val < 1:
+            loss_val.backward()
             self.optimizer.step()
             self.optimizer.zero_grad()
+
+            #cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/test1.png', np_img * 255)
+
 
         return loss_val, output
     

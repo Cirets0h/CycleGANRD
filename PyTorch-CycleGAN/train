@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import torchvision
 
 import wandb
 
@@ -19,6 +20,8 @@ from utils import LambdaLR
 from utils import Logger
 from utils import weights_init_normal
 
+import PIL
+from PIL import Image
 from HTR_ctc.train_code.train_htr import *
 from HTR_ctc.generated_data_loader.generated_utils import *
 from HTR_ctc.generated_data_loader.generated_loader import *
@@ -38,16 +41,27 @@ class AddGaussianNoise(object):
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
-parser.add_argument('--n_epochs', type=int, default=200, help='number of epochs of training')
+parser.add_argument('--n_epochs', type=int, default=15, help='number of epochs of training')
 parser.add_argument('--batchSize', type=int, default=1, help='size of the batches')
 parser.add_argument('--dataroot', type=str, default='datasets/horse2zebra/', help='root directory of the dataset')
-parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate')
-parser.add_argument('--decay_epoch', type=int, default=100, help='epoch to start linearly decaying the learning rate to 0')
+parser.add_argument('--optimizer_lr', type=float, default=0.0002, help='initial learning rate of optimizers')
+parser.add_argument('--decay_epoch', type=int, default=14, help='epoch to start linearly decaying the learning rate to 0')
 parser.add_argument('--size', type=int, default=256, help='size of the data crop (squared assumed)')
 parser.add_argument('--input_nc', type=int, default=3, help='number of channels of input data')
 parser.add_argument('--output_nc', type=int, default=3, help='number of channels of output data')
-parser.add_argument('--cuda', action='store_true', help='use GPU computation')
+parser.add_argument('--cuda', default='True', action='store_true', help='use GPU computation')
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
+parser.add_argument('--rd_lr', type=float, default=0.0000001, help='Learning rate of reading discriminator')
+parser.add_argument('--identity_loss_factor_A', type=float, default=5.0, help='Multiplication factor of the identity loss in A')
+parser.add_argument('--identity_loss_factor_B', type=float, default=4.0, help='Multiplication factor of the identity loss in B')
+parser.add_argument('--gan_loss_factor_B2A', type=float, default=1.0, help='Multiplication factor of the GAN loss from B to A')
+parser.add_argument('--gan_loss_factor_A2B', type=float, default=1.0, help='Multiplication factor of the GAN loss from A to B')
+parser.add_argument('--cycle_loss_factor_A', type=float, default=10.0, help='Multiplication factor of the cycle loss of A')
+parser.add_argument('--cycle_loss_factor_B', type=float, default=8.0, help='Multiplication factor of the cycle loss of B')
+parser.add_argument('--rd_loss_factor_B', type=float, default=2.5, help='Multiplication factor of the reading discriminator loss')
+parser.add_argument('--load_last_model', type=bool, default=False, help='Loading the model parameters of the last run')
+parser.add_argument('--rd_low_loss_learn', type=bool, default=False, help='The reading discriminator only learns on low losses to prevent learning texts that looks too different')
+
 opt = parser.parse_args()
 print(opt)
 
@@ -56,15 +70,16 @@ if torch.cuda.is_available() and not opt.cuda:
 
 ###### Definition of variables ######
 # Parameters
-rd_lr = 0.0000001
-identity_loss_factor_A = 5.0
-gan_loss_factor_B2A = 1.0
-cycle_loss_factor_A = 10.0
-identity_loss_factor_B = 4.0
-gan_loss_factor_A2B = 1.0
-cycle_loss_factor_B = 8.0
-rd_loss_factor_B = 2.5
-load_last_model = False
+rd_lr = opt.rd_lr
+identity_loss_factor_A = opt.identity_loss_factor_A
+gan_loss_factor_B2A = opt.gan_loss_factor_B2A
+cycle_loss_factor_A = opt.cycle_loss_factor_A
+identity_loss_factor_B = opt.identity_loss_factor_B
+gan_loss_factor_A2B = opt.gan_loss_factor_A2B
+cycle_loss_factor_B = opt.cycle_loss_factor_B
+rd_loss_factor_B = opt.rd_loss_factor_B
+load_last_model = opt.load_last_model
+rd_low_loss_learn = opt.rd_low_loss_learn
 
 # Networks
 netG_A2B = Generator(opt.input_nc, opt.output_nc)
@@ -83,15 +98,15 @@ dataloader = DataLoader(dataset, batch_size=opt.batchSize, shuffle=True, num_wor
 
 
 # W & B init
-wandb.init(project="cycleganrd", config={"rd_lr": rd_lr, "optimizer_lr" : opt.lr,
+wandb.init(project="cycleganrd", config={"rd_lr": rd_lr, "optimizer_lr" : opt.optimizer_lr,
                    "identity_loss_factor_A" : identity_loss_factor_A, "gan_loss_factor_B2A" : gan_loss_factor_B2A,
                    "cycle_loss_factor_A" : cycle_loss_factor_A, "identity_loss_factor_B" : identity_loss_factor_B,
                     "gan_loss_factor_A2B" : gan_loss_factor_A2B, "cycle_loss_factor_B" : cycle_loss_factor_B,
-                    "rd_loss_factor_B" : rd_loss_factor_B,
+                    "rd_loss_factor_B" : rd_loss_factor_B, 'rd_low_loss_learn' : rd_low_loss_learn,
                    "crops": 'Bello Gallicum - for 40', "extra" : '', #Binarization + Noise of fakeB to reconstructing A
                    "crop_number" : len(dataset.files_A), "iteration_number" : len(dataloader),
                    "load_last_model": load_last_model})
-
+config = wandb.config
 
 wandb.watch(netG_A2B)
 wandb.watch(netG_B2A)
@@ -99,7 +114,7 @@ wandb.watch(netD_A)
 wandb.watch(netD_B)
 
 # Reading discriminator initialization
-rd, _ = InitStandardRD(wandb=wandb,nlr=rd_lr)
+rd, _ = InitStandardRD(wandb=wandb,nlr=rd_lr, rd_low_loss_learn= rd_low_loss_learn)
 
 if opt.cuda:
     netG_A2B.cuda()
@@ -121,9 +136,9 @@ criterion_identity = torch.nn.L1Loss()
 
 # Optimizers & LR schedulers
 optimizer_G = torch.optim.Adam(itertools.chain(netG_A2B.parameters(), netG_B2A.parameters()),
-                                lr=opt.lr, betas=(0.5, 0.999))
-optimizer_D_A = torch.optim.Adam(netD_A.parameters(), lr=opt.lr, betas=(0.5, 0.999))
-optimizer_D_B = torch.optim.Adam(netD_B.parameters(), lr=opt.lr, betas=(0.5, 0.999))
+                                lr=opt.optimizer_lr, betas=(0.5, 0.999))
+optimizer_D_A = torch.optim.Adam(netD_A.parameters(), lr=opt.optimizer_lr, betas=(0.5, 0.999))
+optimizer_D_B = torch.optim.Adam(netD_B.parameters(), lr=opt.optimizer_lr, betas=(0.5, 0.999))
 
 lr_scheduler_G = torch.optim.lr_scheduler.LambdaLR(optimizer_G, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
 lr_scheduler_D_A = torch.optim.lr_scheduler.LambdaLR(optimizer_D_A, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
@@ -180,42 +195,28 @@ for epoch in range(opt.epoch, opt.n_epochs):
         # GAN loss
         fake_B = netG_A2B(real_A)
         pred_fake = netD_B(fake_B)
-        loss_GAN_A2B = criterion_GAN(pred_fake, target_real) * gan_loss_factor_A2B
+        loss_GAN_A2B = criterion_GAN(pred_fake.squeeze(1), target_real) * gan_loss_factor_A2B
 
-        # #here begins the binarization
-        torch_zeros = torch.zeros(real_B.size())
-        torch_ones = torch.ones(real_B.size())
-        #
-        # #if pixel values are over 0.3, they get 0, otherwise 1
-        real_B_binary = torch.where(real_B.cpu() > 0.5, torch_ones, torch_zeros)
-        #
-        # #equalize all three channels so its only black and white
-        real_B_binary_np = real_B_binary.numpy()[0]
-        real_B_binary_np = np.where(real_B_binary_np[0] + real_B_binary_np[1] + real_B_binary_np[2] == 3, np.ones(real_B_binary_np.shape), np.zeros(real_B_binary_np.shape))
-        real_B_binary = torch.Tensor(real_B_binary_np).unsqueeze(0)
-        fake_A = netG_B2A(real_B_binary.cuda())
+
+        fake_A = netG_B2A(real_B)
 
         pred_fake = netD_A(fake_A)
-        loss_GAN_B2A = criterion_GAN(pred_fake, target_real) * gan_loss_factor_B2A
+        loss_GAN_B2A = criterion_GAN(pred_fake.squeeze(1), target_real) * gan_loss_factor_B2A
 
-
-        #here begins the binarization
-        torch_zeros = torch.zeros(fake_B.size())
-        torch_ones = torch.ones(fake_B.size())
-
-        # #if pixel values are over 0.3, they get 0, otherwise 1
-        fake_B_binary = torch.where(fake_B.cpu() > 0.5, torch_ones, torch_zeros)
         #
-        # #equalize all three channels so its only black and white
-        fake_B_binary_np = fake_B_binary.numpy()[0]
-        fake_B_binary_np = np.where(fake_B_binary_np[0] + fake_B_binary_np[1] + fake_B_binary_np[2] == 3, np.ones(fake_B_binary_np.shape), np.zeros(fake_B_binary_np.shape))
-        fake_B_binary = torch.Tensor(fake_B_binary_np).unsqueeze(0)
+        # fake_B_np = fake_B.detach().cpu().data.numpy()[0]
+        # fake_B_shape = fake_B.shape
+        # fake_B_np = image_resize(fake_B_np, channel=fake_B_shape[1], height=int((fake_B_shape[2]) / 2), width=int(fake_B_shape[3] / 2), order=0)
+        # fake_B_np = image_resize(fake_B_np, channel=fake_B_shape[1], height=(fake_B_shape[2]), width=fake_B_shape[3], order=0)
+        #np_img = np.transpose(fake_B_np, (1, 2, 0))
         #
         # # # #noise
         # fake_B_binary = fake_B_binary + torch.randn(fake_B_binary.size()) * 0.0001
-        # np_img = fake_B_binary.detach().squeeze(0).permute(1, 2, 0).cpu().numpy()
-        # cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/fake_B_binary.png', np_img * 255)
+        #np_img = fake_B.detach().squeeze(0).permute(1, 2, 0).cpu().numpy()
+        #np_img = fake_B_rescaled.permute(1, 2, 0).cpu().numpy()
+        #cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/fake_B_rescale.png', np_img*255)
 
+        # fake_B_rescaled = torch.Tensor(fake_B_np).unsqueeze(0)
         recovered_A = netG_B2A(fake_B) #
 
         # aba = np.concatenate((real_A.detach().squeeze(0).permute(1,2,0).cpu().numpy(), fake_B.detach().squeeze(0).permute(1,2,0).cpu().numpy(), fake_B_binary.detach().squeeze(0).permute(1, 2, 0).cpu().numpy(), recovered_A.detach().squeeze(0).permute(1,2,0).cpu().numpy()), axis=1) *255
@@ -259,12 +260,12 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         # Real loss
         pred_real = netD_A(real_A)
-        loss_D_real = criterion_GAN(pred_real, target_real)
+        loss_D_real = criterion_GAN(pred_real.squeeze(1), target_real)
 
         # Fake loss
         fake_A_buff = fake_A_buffer.push_and_pop(fake_A)
         pred_fake = netD_A(fake_A_buff.detach())
-        loss_D_fake = criterion_GAN(pred_fake, target_fake)
+        loss_D_fake = criterion_GAN(pred_fake.squeeze(1), target_fake)
 
         # Total loss
         loss_D_A = (loss_D_real + loss_D_fake)*0.5
@@ -278,12 +279,12 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         # Real loss
         pred_real = netD_B(real_B)
-        loss_D_real = criterion_GAN(pred_real, target_real)
+        loss_D_real = criterion_GAN(pred_real.squeeze(1), target_real)
         
         # Fake loss
         fake_B_buff = fake_B_buffer.push_and_pop(fake_B)
         pred_fake = netD_B(fake_B_buff.detach())
-        loss_D_fake = criterion_GAN(pred_fake, target_fake)
+        loss_D_fake = criterion_GAN(pred_fake.squeeze(1), target_fake)
 
         # Total loss
         loss_D_B = (loss_D_real + loss_D_fake)*0.5
@@ -318,7 +319,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
                           'loss_GAN_A2B': loss_GAN_A2B, 'loss_GAN_B2A' : loss_GAN_B2A,
                           'loss_cycle_ABA': loss_cycle_ABA, 'loss_cycle_BAB' : loss_cycle_BAB,
                           'loss_D_A': (loss_D_A), 'loss_D_B': loss_D_B,
-                        'A -> B -> A': [wandb.Image(real_A,  caption='real_A'), wandb.Image(fake_B, caption='fake_B'), wandb.Image(fake_B_binary, caption='fake_B_binary'), wandb.Image(recovered_A, caption='recovered_A')], 'B -> A -> B': [wandb.Image(real_B,  caption='real_B'), wandb.Image(fake_A, caption='fake_A'),  wandb.Image(recovered_B, caption='recovered_B')]})
+                        'A -> B -> A': [wandb.Image(real_A,  caption='real_A'), wandb.Image(fake_B, caption='fake_B'), wandb.Image(recovered_A, caption='recovered_A')], 'B -> A -> B': [wandb.Image(real_B,  caption='real_B'), wandb.Image(fake_A, caption='fake_A'),  wandb.Image(recovered_B, caption='recovered_B')]})
             else:
                 wandb.log({'loss_G': loss_G, 'loss_G_identity': (loss_identity_A + loss_identity_B), 'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A),
                         'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB), 'loss_D': (loss_D_A + loss_D_B), 'loss_RD': rd_loss,

@@ -44,7 +44,7 @@ def InitDataset(data_set, augment_factor = 0):
     return train_set, test_set, train_loader, test_loader
 
 
-def InitStandardRD(wandb = None, nlr=1e-4):
+def InitStandardRD(wandb = None, nlr=1e-4, rd_low_loss_learn=False):
     logger.info('Loading dataset')
 
 
@@ -65,7 +65,7 @@ def InitStandardRD(wandb = None, nlr=1e-4):
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [int(.5 * max_epochs), int(.75 * max_epochs)])
 
     logger.info('Initializing Reading Discriminator')
-    rd = ReadingDiscriminator(optimizer, net, loss, 1e-4, load_model_name)
+    rd = ReadingDiscriminator(optimizer, net, loss, 1e-4, load_model_name, rd_low_loss_learn)
     return rd, scheduler
 
 

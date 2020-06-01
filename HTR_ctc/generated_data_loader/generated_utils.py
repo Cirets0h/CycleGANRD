@@ -142,7 +142,7 @@ def getRandomCrop(image, image_name, source):
 def normalize_array(array):
     return np.subtract(np.divide(array, 127.5), 1)
 
-def resizeImg(img, fixed_size):
+def resizeImg(img, fixed_size , order=1):
         nheight = fixed_size[0]
         nwidth = fixed_size[1]
         if nheight is None:
@@ -150,7 +150,7 @@ def resizeImg(img, fixed_size):
         if nwidth is None:
             nwidth = int(np.random.uniform(.8, 1.2) * img.shape[1] * nheight / img.shape[0])
 
-        img = image_resize(img, height=nheight-16, width=nwidth)
+        img = image_resize(img, height=nheight-16, width=nwidth, order=order)
        # img = centered(img, (nheight, int(1.2 * nwidth) + 32))
         img = torch.Tensor(img).float().unsqueeze(0)
         return img

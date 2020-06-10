@@ -18,7 +18,10 @@ except:
     from HTR_ctc.train_code.config import *
     from HTR_ctc.train_code.reading_discriminator import *
 
-
+try:
+    from utils.auxilary_functions import image_resize, centered
+except:
+    from HTR_ctc.utils.auxilary_functions import image_resize, centered
 
 
 
@@ -100,7 +103,16 @@ if __name__ == "__main__":
     _, test_set, train_loader, _ = InitDataset(args.data_set, augment_factor=2)
     rd, scheduler = InitStandardRD(nlr=args.learning_rate)
 
-    img = cv2.normalize(cv2.imread('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/TestWords.png', cv2.IMREAD_GRAYSCALE), None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    img = cv2.normalize(cv2.imread('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/TestWord.png', cv2.IMREAD_GRAYSCALE), None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+    nheight = img.shape[0]
+    nwidth = img.shape[1]
+    if nheight is None:
+        nheight = img.shape[0]
+    if nwidth is None:
+        nwidth = int(np.random.uniform(.8, 1.2) * img.shape[1] * nheight / img.shape[0])
+
+    img = image_resize(img, height=nheight - 16, width=nwidth, order=1)
     img = torch.Tensor(img).float().unsqueeze(0)
     print(rd.getResult(img))
     logger.info('Training:')

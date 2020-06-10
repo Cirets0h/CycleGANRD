@@ -8,6 +8,8 @@ import numpy as np
 import cv2
 import torch
 from torch.utils.data import Dataset
+from skimage import io as img_io
+
 
 from os.path import isfile
 
@@ -30,12 +32,14 @@ def main_loader(set, level):
             print('imgs: [{}/{} ({:.0f}%)]'.format(i, len(info), 100. * i / len(info)))
 
         try:
-            img = cv2.normalize(cv2.imread(img_path + '.png'), None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+            #img2 = img_io.imread(img_path + '.png')
+            #img2 = 1 - img2.astype(np.float32) / 255.0
+            img = cv2.normalize(cv2.imread(img_path + '.png', cv2.IMREAD_GRAYSCALE), None, alpha=0, beta=1.0, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
         except:
             continue
 
         #if len(transcr) > 5:
-        data += [(img, transcr.replace("|", " "))]
+        data += [(img.copy(), transcr.replace("|", " "))]
 
     if set == 'train':
         data = data[:int(0.8*len(data))]

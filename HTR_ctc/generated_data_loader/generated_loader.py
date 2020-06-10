@@ -70,10 +70,10 @@ class GeneratedLoader(Dataset):
 
         #end augmentation
 
-        img = img.resize(int((nheight-16)/2), int(nwidth/2), PIL.Image.NEAREST)
-
-        img = img.resize((nheight-16, nwidth), PIL.Image.NEAREST)
-        #img = image_resize(img, height=nheight-16, width=nwidth)
+        # img = img.resize(int((nheight-16)/2), int(nwidth/2), PIL.Image.NEAREST)
+        #
+        # img = img.resize((nheight-16, nwidth), PIL.Image.NEAREST)
+        img = image_resize(img, height=nheight-16, width=nwidth)
 
 
         # binarization

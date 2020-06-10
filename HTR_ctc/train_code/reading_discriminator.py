@@ -41,7 +41,10 @@ class ReadingDiscriminator():
         closs = []
         for iter_idx, (img, transcr) in enumerate(train_loader):
             loss, _ = self.train(img, transcr)
-            closs += [loss.data]
+            try:
+                closs += [loss.data]
+            except:
+                print('bla')
             print(loss.data)
             if iter_idx % 50 == 1:
                 logger.info('Epoch %d, Iteration %d: %f', epoch, iter_idx + 1, sum(closs) / len(closs))
@@ -64,6 +67,8 @@ class ReadingDiscriminator():
 
 
     def train(self, img, transcr):
+        # for name, param in self.net.named_parameters():
+        #     print(name, param.grad)
         img = Variable(img.to(device))
         # cuda augm - alternatively for cpu use it on dataloader
         img = torch_augm(img)
@@ -86,10 +91,14 @@ class ReadingDiscriminator():
 
         # if self.rd_low_loss_learn is true, the network only learns on a loss lower than 1
         # if off it learns on everything
+        # todo: make loss_val variable or more intuitive than just 1
+        self.optimizer.zero_grad()
+
         if not self.rd_low_loss_learn or loss_val < 1:
             loss_val.backward()
             self.optimizer.step()
-            self.optimizer.zero_grad()
+
+
 
             #cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/test1.png', np_img * 255)
 
@@ -139,7 +148,7 @@ class ReadingDiscriminator():
 
         self.net.train()
 
-    def saveModel(self, filename):
+    def saveModel(self, filename, model_path = model_path):
         torch.save(self.net.state_dict(), model_path + filename)
 
     def loadModel(self, filename):

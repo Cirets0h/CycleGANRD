@@ -62,7 +62,7 @@ class Generator(nn.Module):
 
     def forward(self, x):
         #torch.randn(x.size()) * 0.001 + 0. # Gaussian Noise
-        return (self.model(x)+1)/2
+        return self.model(x)
 
 class Discriminator(nn.Module):
     def __init__(self, input_nc):

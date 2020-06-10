@@ -1,5 +1,5 @@
 
-classes = '_!"#&\'()[]+,-./0123456789:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz '
+classes = '_!"#*&\'()[]+,-./0123456789:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz '
 cdict = {c:i for i,c in enumerate(classes)}
 icdict = {i:c for i,c in enumerate(classes)}
 
@@ -13,6 +13,6 @@ iter_size = 16
 # fixed_size
 
 model_path = '/home/manuel/CycleGANRD/HTR_ctc/saved_models/'
-save_model_name = 'crnn_' + data_name + '_lowercase.pt'
-#load_model_name = None
-load_model_name = 'crnn_' + data_name + '_lowercase.pt'
+save_model_name = 'crnn_' + data_name + '_lowercase_new_gen.pt'
+#load_model_name = None‚
+load_model_name = 'crnn_' + data_name + '_lowercase_new_gen.pt'#'crnn_' + data_name + '_only_gen.pt'

@@ -31,6 +31,7 @@ def getWordsInCrop(name, source, x0, y0, x1, y1):
     y0_new = 0
     x1_new = 0
     y1_new = bounding_box
+    csvCropString = []
     wordOver = False
     fix = False
     hasWord = False # Variable that is returned determinating if the crop contain a word (It could also be a crop thats is only a lettrine)
@@ -48,6 +49,9 @@ def getWordsInCrop(name, source, x0, y0, x1, y1):
                         word + delimiter + str(pfloat(x0_new - x0)) + delimiter + str(pfloat(y0_new - y0)) + delimiter + str(
                             pfloat(x1_new - x0)) + delimiter + str(pfloat(y1_new - y0)) + delimiter + str(
                             y_scope_out) + delimiter + pre + delimiter + post + '\n')
+                    csvCropString.append(word + delimiter + str(pfloat(x0_new - x0)) + delimiter + str(pfloat(y0_new - y0)) + delimiter + str(
+                            pfloat(x1_new - x0)) + delimiter + str(pfloat(y1_new - y0)) + delimiter + str(
+                            y_scope_out) + delimiter + pre + delimiter + post)
                 word = ""
                 pre = ""
                 post = ""
@@ -82,9 +86,9 @@ def getWordsInCrop(name, source, x0, y0, x1, y1):
                         y_scope_out = True
 
     csvCrop.close()
-    return hasWord
+    return hasWord, csvCropString
 
-def cropWords(image, name, source):
+def cropWords(image, name='', source='', csvfile=None):
     #print(name)
     if torch.is_tensor(image):
         image = image.detach().squeeze(0).transpose(0,2).transpose(0,1).cpu().numpy()
@@ -93,7 +97,10 @@ def cropWords(image, name, source):
 
     word_array = []
     info_array = []
-    with open(source + 'csv-crop/' + name + '.csv') as csvfile:
+
+    if csvfile is None:
+        csvfile = open(source + 'csv-crop/' + name + '.csv')
+        #with open(source + 'csv-crop/' + name + '.csv') as csvfile:
         reader = csv.DictReader(csvfile, delimiter=delimiter)
         for row in reader:
             # print(row['y0'])
@@ -107,8 +114,21 @@ def cropWords(image, name, source):
             # todo: insert below code and adjust Reading Discriminator for pre and postfixes
             #info_array.append({'word': row['word'], 'pre': row['pre'], 'post': row['post'], 'y_scope_out': row['y_scope_out']})
 
-    #for x in range(0, len(word_array)):
-    #    toimage((word_array[x].numpy()), cmin=-1, cmax=1).save('generate_book-crop/(' + info_array[x]['pre'] + ')' + info_array[x]['word'] + '(' + info_array[x]['post'] + ')' + info_array[x]['y_scope_out']  +'.png')
+        #for x in range(0, len(word_array)):
+        #    toimage((word_array[x].numpy()), cmin=-1, cmax=1).save('generate_book-crop/(' + info_array[x]['pre'] + ')' + info_array[x]['word'] + '(' + info_array[x]['post'] + ')' + info_array[x]['y_scope_out']  +'.png')
+    else:
+        for rows in csvfile:
+            row = ''.join(rows)
+            row = row.rsplit('$')
+            # 0 : word , 1: x0 , 2: y0 , 3: x1 , 4 : y1 , 5 : y_scope_out, 6 : pre , 7 : post
+            y0 = math.floor(float(row[2]) + -10)
+            if y0 < 0:
+                y0 = 0
+            output = image[y0: math.ceil(float(row[4]) + 10),
+                     math.floor(float(row[1])): math.ceil(float(row[3])), :]
+            word_array.append(output)
+            info_array.append(row[6] + row[0] + row[7])
+
     return word_array, info_array
 
 def pfloat(number): # positive float
@@ -131,12 +151,12 @@ def getRandomCrop(image, image_name, source):
         # print('x: ' + str(rand_x) + ', y: ' + str(rand_y))
         #image = tf.image.crop_to_bounding_box(image, rand_y, rand_x, boundingBox_size, boundingBox_size)
         croppedImage = image[rand_y: rand_y + boundingBox_size, rand_x: rand_x + boundingBox_size,:]
-        hasWords = getWordsInCrop(image_name.rsplit('.')[0], source, rand_x, rand_y, rand_x + boundingBox_size,
+        hasWords, csvCropString = getWordsInCrop(image_name.rsplit('.')[0], source, rand_x, rand_y, rand_x + boundingBox_size,
                                        rand_y + boundingBox_size)
         if np.mean(croppedImage) < 230 and hasWords:  # recrop if picture is too white (not enough text)
             break
 
-    return croppedImage
+    return croppedImage, csvCropString
 
 #todo: delete
 def normalize_array(array):
@@ -173,9 +193,10 @@ def generateCrops(nr_of_channels, source, just_generate = False, crop_path = 'tr
                     image = cv2.normalize(image, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
 
-            image = getRandomCrop(image, image_name, source)
+            image, csvCropString = getRandomCrop(image, image_name, source)
             if just_generate:
-                cv2.imwrite(source + crop_path + image_name.rsplit('.')[0] + '-crop.png', image)
+                #cv2.imwrite(source + crop_path + image_name.rsplit('.')[0] + '-crop.png', image)
+                data.append([image.copy(), csvCropString])
             else:
                 word_array, info_array = cropWords(image, image_name.rsplit('.')[0] + '-crop',
                                                    source)

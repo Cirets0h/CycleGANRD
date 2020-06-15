@@ -15,27 +15,30 @@ class ImageDataset(Dataset):
         self.files_B = []
         self.transform = transforms.Compose(transforms_)
         self.unaligned = unaligned
-        
+        self.mode = mode
 
         self.crops_A =  generateCrops(3, '/home/manuel/CycleGANRD/PyTorch-CycleGAN/datasets/cropped_data/', just_generate=True, crop_path='train/A/')
 
         self.files_B_name = sorted(glob.glob(os.path.join(root, '%s/B' % mode) + '/*.*'))
 
         for name_B in self.files_B_name:
-            a = cv2.imread(name_B)
-            item_B = self.transform(cv2.normalize(a, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F))
+            item_B = self.transform(cv2.normalize(cv2.imread(name_B), None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F))
             self.files_B.append([item_B, name_B])
 
-        for crop_A, csvfile_A in self.crops_A:
-            item_A = self.transform(cv2.normalize(crop_A, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F))
-            self.files_A.append([item_A, csvfile_A])
+        if mode != 'testHist':
+            for crop_A, csvfile_A in self.crops_A:
+                item_A = self.transform(cv2.normalize(crop_A, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F))
+                self.files_A.append([item_A, csvfile_A])
 
 
 
     def __getitem__(self, index):
-        item_A, A_csv = self.files_A[index % len(self.crops_A)]
         item_B, name_B = self.files_B[index % len(self.files_B_name)]
-        return {'A': item_A, 'A_csv': A_csv, 'B': item_B, 'B_name': name_B}
+        if self.mode != 'testHist':
+            item_A, A_csv = self.files_A[index % len(self.crops_A)]
+            return {'A': item_A, 'A_csv': A_csv, 'B': item_B, 'B_name': name_B}
+        else:
+            return {'B': item_B, 'B_name': name_B}
 
     def __len__(self):
         return max(len(self.crops_A), len(self.files_B_name))

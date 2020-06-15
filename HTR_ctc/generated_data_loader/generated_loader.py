@@ -83,7 +83,5 @@ class GeneratedLoader(Dataset):
 
         img = torch.Tensor(img).float().unsqueeze(0)
 
-        img = torch.where(img > 0.7, torch.ones(img.size()), torch.zeros(img.size()))
-
         return img, transcr
 

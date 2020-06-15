@@ -7,10 +7,12 @@ try:
     from iam_data_loader.iam_loader import IAMLoader
     from generated_data_loader.generated_loader import GeneratedLoader
     from models.crnn import CRNN
+    from HTR_ctc.models.htr_net import HTRNet
 except:
     from HTR_ctc.iam_data_loader.iam_loader import IAMLoader
     from HTR_ctc.generated_data_loader.generated_loader import GeneratedLoader
     from HTR_ctc.models.crnn import CRNN
+    from HTR_ctc.models.htr_net import HTRNet
 try:
     from config import *
     from reading_discriminator import *
@@ -100,7 +102,7 @@ if __name__ == "__main__":
         logger.info('%s: %s', str(key), str(value))
     logger.info('###########################################')
 
-    _, test_set, train_loader, _ = InitDataset(args.data_set, augment_factor=2)
+    _, test_set, train_loader, test_loader = InitDataset(args.data_set, augment_factor=2)
     rd, scheduler = InitStandardRD(nlr=args.learning_rate)
 
     img = cv2.normalize(cv2.imread('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/TestWord.png', cv2.IMREAD_GRAYSCALE), None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
@@ -118,10 +120,10 @@ if __name__ == "__main__":
     logger.info('Training:')
     for epoch in range(1, max_epochs + 1):
 
-        rd.train_on_Dataloader(epoch, train_loader, test_set, scheduler)
-        if epoch % 1 == 0:
-            logger.info('Saving net after %d epochs', epoch)
-            rd.saveModel(save_model_name)
+        rd.train_on_Dataloader(epoch, train_loader, test_set, test_loader, scheduler)
+        # if epoch % 1 == 0:
+        logger.info('Saving net after %d epochs', epoch)
+        rd.saveModel(save_model_name)
 
 
 

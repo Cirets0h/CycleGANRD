@@ -76,9 +76,9 @@ def image_resize(img, height=None, width=None, channel=0, order=1):
         scale = float(width) / float(img.shape[1])
         height = int(scale*img.shape[0])
     if channel == 0:
-        img = resize(image=img, output_shape=(height, width), order=1).astype(np.float32)
+        img = resize(image=img, output_shape=(height, width), order=order).astype(np.float32)
     else:
-        img = resize(image=img, output_shape=(channel, height, width), order=1).astype(np.float32)
+        img = resize(image=img, output_shape=(channel, height, width), order=order).astype(np.float32)
 
 
     return img

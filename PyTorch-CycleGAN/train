@@ -35,14 +35,15 @@ class AddGaussianNoise(object):
         self.mean = mean
 
     def __call__(self, tensor):
-        return tensor + torch.randn(tensor.size()) * self.std + self.mean
+        curr_tens = tensor + torch.randn(tensor.size()) * self.std + self.mean
+        return torch.where(curr_tens > 1.0, torch.ones(curr_tens.size()), torch.where(curr_tens < 0.0, torch.zeros(curr_tens.size()), curr_tens))
 
     def __repr__(self):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
-parser.add_argument('--n_epochs', type=int, default=200, help='number of epochs of training')
+parser.add_argument('--n_epochs', type=int, default=201, help='number of epochs of training')
 parser.add_argument('--batchSize', type=int, default=1, help='size of the batches')
 parser.add_argument('--dataroot', type=str, default='datasets/horse2zebra/', help='root directory of the dataset')
 parser.add_argument('--optimizer_lr', type=float, default=0.0002, help='initial learning rate of optimizers')
@@ -54,16 +55,24 @@ parser.add_argument('--cuda', default='True', action='store_true', help='use GPU
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
 parser.add_argument('--rd_lr', type=float, default=0.0000001, help='Learning rate of reading discriminator')
 parser.add_argument('--identity_loss_factor_A', type=float, default=5.0, help='Multiplication factor of the identity loss in A')
-parser.add_argument('--identity_loss_factor_B', type=float, default=4.0, help='Multiplication factor of the identity loss in B')
+parser.add_argument('--identity_loss_factor_B', type=float, default=5.0, help='Multiplication factor of the identity loss in B')
 parser.add_argument('--gan_loss_factor_B2A', type=float, default=1.0, help='Multiplication factor of the GAN loss from B to A')
 parser.add_argument('--gan_loss_factor_A2B', type=float, default=1.0, help='Multiplication factor of the GAN loss from A to B')
 parser.add_argument('--cycle_loss_factor_A', type=float, default=10.0, help='Multiplication factor of the cycle loss of A')
-parser.add_argument('--cycle_loss_factor_B', type=float, default=8.0, help='Multiplication factor of the cycle loss of B')
+parser.add_argument('--cycle_loss_factor_B', type=float, default=10.0, help='Multiplication factor of the cycle loss of B')
 parser.add_argument('--rd_loss_factor_B', type=float, default=2.5, help='Multiplication factor of the reading discriminator loss')
 parser.add_argument('--rd_loss_factor_A', type=float, default=2.5, help='Multiplication factor of the reading discriminator loss')
 parser.add_argument('--load_last_model', type=bool, default=False, help='Loading the model parameters of the last run')
+parser.add_argument('--use_rd', type=bool, default=False, help='The reading discriminator is used')
+parser.add_argument('--use_rd_A', type=bool, default=False, help='The second reading discriminator is used')
 parser.add_argument('--rd_low_loss_learn', type=bool, default=False, help='The reading discriminator only learns on low losses to prevent learning texts that looks too different')
 parser.add_argument('--cycleloss_function', choices=['L1', 'SSIM'], default='L1', help='Loss function for the cycle loss')
+parser.add_argument('--source_dataset', choices=['EG-old', 'EG-BG-LC-old', 'EG', 'EG-LC', 'EG-BG', 'EG-BG-LC'], default='EG-BG-LC', help='Which source dataset to pick')
+parser.add_argument('--rd_pretrain_load', choices=[None, 'IAM.pt', 'GEN_EG_BG_LC.pt', 'GEN_EG_BG.pt'], default=None, help='Which pretraining for reading discriminator to use')
+parser.add_argument('--noise', type=float, default=0.05, help='Amount of gaussian noise')
+parser.add_argument('--regenerate', type=bool, default=False, help='Decides if all source crops are regenerated every epoch')
+parser.add_argument('--resetRD', type=bool, default=False, help='Resets the reading discriminator after 10 epochs')
+
 
 opt = parser.parse_args()
 print(opt)
@@ -76,6 +85,13 @@ if torch.cuda.is_available() and not opt.cuda:
 
 ###### Definition of variables ######
 # Parameters
+use_rd = opt.use_rd
+use_rd_A = opt.use_rd_A
+if use_rd_A and not use_rd:
+    print('Can not use second reading discriminator without using first.')
+
+
+
 rd_lr = opt.rd_lr
 identity_loss_factor_A = opt.identity_loss_factor_A
 gan_loss_factor_B2A = opt.gan_loss_factor_B2A
@@ -88,8 +104,18 @@ rd_loss_factor_A = opt.rd_loss_factor_A
 load_last_model = opt.load_last_model
 rd_low_loss_learn = opt.rd_low_loss_learn
 cycleloss_function = opt.cycleloss_function
+regenerate = opt.regenerate
 lowest_G_loss = 100
-random_noise_factor = 0.001
+lowest_CER = 1
+random_noise_factor = opt.noise
+rd_pretrain_load = opt.rd_pretrain_load
+resetRD = opt.resetRD
+
+if 'LC' not in opt.source_dataset:
+    forceLower = True
+else:
+    forceLower = False
+
 # Networks
 netG_A2B = Generator(opt.input_nc, opt.output_nc)
 netG_B2A = Generator(opt.output_nc, opt.input_nc)
@@ -101,7 +127,8 @@ transforms_ = [ transforms.ToTensor()]
                 #transforms.Normalize((0.5,0.5,0.5), (0.5,0.5,0.5)),
                 #AddGaussianNoise(0., 0.001)
 
-dataset = ImageDataset(opt.dataroot, transforms_=transforms_, unaligned=True)
+dataset = ImageDataset(opt.dataroot, transforms_=transforms_, unaligned=True, source_dataset= opt.source_dataset)
+
 
 dataloader = DataLoader(dataset, batch_size=opt.batchSize, shuffle=True, num_workers=opt.n_cpu)
 
@@ -110,13 +137,14 @@ dataloader = DataLoader(dataset, batch_size=opt.batchSize, shuffle=True, num_wor
 wandb.init(project="cycleganrd", config={"rd_lr": rd_lr, "optimizer_lr" : opt.optimizer_lr,
                    "identity_loss_factor_A" : identity_loss_factor_A, "gan_loss_factor_B2A" : gan_loss_factor_B2A,
                    "cycle_loss_factor_A" : cycle_loss_factor_A, "identity_loss_factor_B" : identity_loss_factor_B,
-                    "gan_loss_factor_A2B" : gan_loss_factor_A2B, "cycle_loss_factor_B" : cycle_loss_factor_B,
+                    "gan_loss_factor_A2B" : gan_loss_factor_A2B, "cycle_loss_factor_B" : cycle_loss_factor_B, "rd_loss_factor_A": rd_loss_factor_A,
                     "rd_loss_factor_B" : rd_loss_factor_B, 'rd_low_loss_learn' : rd_low_loss_learn,
-                   "crops": 'Bello Gallicum - for 40', "extra" : 'random noise + two rd + noise before GAN_loss', #Binarization + Noise of fakeB to reconstructing A
+                   "crops": opt.source_dataset, "extra" : 'Recrop the words before in reading discriminator + no regeneration after every epoch', #Binarization + Noise of fakeB to reconstructing A
                    "crop_number" : len(dataset.files_A), "iteration_number" : len(dataloader),
                    "load_last_model": load_last_model, 'cycleloss_function': cycleloss_function,
                                          'rd_model_name' : load_model_name, 'save_number' : save_number,
-                                         'random_noise_factor' : random_noise_factor})
+                                         'random_noise_factor' : random_noise_factor, "use_rd": use_rd,
+                                         'use_rd_A': use_rd_A, 'rd_pretrain_load':  rd_pretrain_load, 'regenerate': regenerate})
 config = wandb.config
 
 wandb.watch(netG_A2B)
@@ -125,8 +153,11 @@ wandb.watch(netD_A)
 wandb.watch(netD_B)
 
 # Reading discriminator initialization
-rd, _ = InitStandardRD(wandb=wandb,nlr=rd_lr, rd_low_loss_learn= rd_low_loss_learn)
-rd_A, _ = InitStandardRD(wandb=wandb,nlr=0, rd_low_loss_learn= rd_low_loss_learn)
+if use_rd:
+    rd, _ = InitStandardRD(wandb=wandb,nlr=rd_lr, rd_low_loss_learn= rd_low_loss_learn, load_model=rd_pretrain_load)
+    rd.saveModel(str(save_number) + '/rd_0.pt', model_path='/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/')
+    if use_rd_A:
+        rd_A, _ = InitStandardRD(wandb=wandb,nlr=0, rd_low_loss_learn= rd_low_loss_learn, load_model='GEN_EG_BG_LC.pt') #learning rate is 0 because its already perfectly pretrained on electronic and shouldn't adapt
 
 if opt.cuda:
     netG_A2B.cuda()
@@ -185,7 +216,8 @@ if load_last_model:
     netG_B2A.load_state_dict(torch.load('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/netG_B2A.pth'))
     netD_A.load_state_dict(torch.load('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/netD_A.pth'))
     netD_B.load_state_dict(torch.load('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/netD_B.pth'))
-    rd.loadModel('rd.pt')
+    if use_rd:
+        rd.loadModel('rd.pt')
 
 ##########
 trans = transforms.Compose(transforms_)
@@ -217,20 +249,18 @@ for epoch in range(opt.epoch, opt.n_epochs):
         # GAN loss
         fake_B = netG_A2B(real_A)
 
-        fake_B = noise(fake_B.cpu())
-        fake_B = torch.where(fake_B > 1.0, torch.ones(fake_B.size()), fake_B).cuda()
-
         pred_fake = netD_B(fake_B)
         loss_GAN_A2B = criterion_GAN(pred_fake.squeeze(1), target_real) * gan_loss_factor_A2B
 
+        #fake_B = noise(fake_B.cpu()).cuda()
 
         fake_A = netG_B2A(real_B)
-        fake_A = noise(fake_A.cpu())
-        fake_A = torch.where(fake_A > 1.0, torch.ones(fake_A.size()),  fake_A).cuda()
+
 
         pred_fake = netD_A(fake_A)
         loss_GAN_B2A = criterion_GAN(pred_fake.squeeze(1), target_real) * gan_loss_factor_B2A
 
+        #fake_A = noise(fake_A.cpu()).cuda()
         #
         #fake_B_np = fake_B.detach().cpu().data.numpy()[0]
         # fake_B_shape = fake_B.shape
@@ -249,13 +279,12 @@ for epoch in range(opt.epoch, opt.n_epochs):
         #recovered_A = netG_B2A(fake_B)
         # np_img = fake_B_rescaled.permute(1, 2, 0).cpu().numpy()
         # cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/fake_B_rescale.png', np_img*255)
-
-        recovered_A = netG_B2A(fake_B)
-        #recovered_B = netG_A2B(fake_A)
-
-        recovered_B = netG_A2B(fake_A)
-
-
+        if random_noise_factor != 0:
+            recovered_A = netG_B2A(noise(fake_B.cpu()).cuda())
+            recovered_B = netG_A2B(noise(fake_A.cpu()).cuda())
+        else:
+            recovered_A = netG_B2A(fake_B)
+            recovered_B = netG_A2B(fake_A)
         # real_B_binary = torch.where(real_B.cpu() > 0.7, torch.ones(real_B.size()),  torch.zeros(real_B.size()))
         # real_A_binary = torch.where(real_A.cpu() > 0.7, torch.ones(real_A.size()),  torch.zeros(real_A.size()))
         # recovered_A_binary = torch.where(recovered_A.cpu() > 0.7, torch.ones(recovered_A.size()),  torch.zeros(recovered_A.size()))
@@ -273,45 +302,43 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
 
 
+        if use_rd:
+            rd_loss = 0
+            rd_A_loss = 0
+            word_array, info_array = cropWords(fake_B, csvfile=batch['A_csv'])
+            word_array_A, _ = cropWords(recovered_A, csvfile=batch['A_csv'])
 
-        rd_loss = 0
-        rd_A_loss = 0
-        #name_A = str(batch['A_name'][0]).rsplit('/')
-        #name_A = name_A[len(name_A) - 1].rsplit('.')[0]
-        #np_img = fake_B.detach().squeeze(0).permute(1, 2, 0).cpu().numpy()
-        #cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/fake_B.png', np_img * 255)
-        word_array, info_array = cropWords(fake_B, csvfile=batch['A_csv'])
-        word_array_A, _ = cropWords(recovered_A, csvfile=batch['A_csv'])
-        for i in range(0, len(word_array)):
-            if info_array[i] != 'l':
-                #cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/word_' + str(i) + '.png', word_array[i]*255)
-                tens = resizeImg(word_array[i],(128, None)).transpose(1, 3).transpose(2, 3)
-                tens_A = resizeImg(word_array_A[i],(128, None)).transpose(1, 3).transpose(2, 3)
-                #np_img = tens.detach().squeeze(0).permute(1, 2, 0).cpu().numpy()
-                #cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/word_trans' + str(i) + '.png', np_img*255)
-                loss, _ = rd.train(tens, (info_array[i],))
-                loss_A, _ = rd_A.train(tens_A, (info_array[i],))
-                rd_loss += loss.data
-                rd_A_loss += loss_A.data
+            for i in range(0, len(word_array)):
+                if info_array[i] != 'l':
+                    tens = resizeImg(word_array[i],(48, 128)).transpose(1, 3).transpose(2, 3)
+                    loss, _ = rd.train(tens, (info_array[i],), 1)
+                    try:
+                        rd_loss += loss.data
+                    except:
+                        print('bla')
+                    if use_rd_A:
+                        tens_A = resizeImg(word_array_A[i], (48, 128)).transpose(1, 3).transpose(2, 3)
+                        loss_A, _ = rd_A.train(tens_A, (info_array[i],), 1)
+                        rd_A_loss += loss_A.data
 
-        rd_loss = rd_loss/len(word_array) * rd_loss_factor_B
-        rd_A_loss = rd_A_loss/len(word_array_A) * rd_loss_factor_A
+            rd_loss = rd_loss/len(word_array) * rd_loss_factor_B
+            if use_rd_A:
+                rd_A_loss = rd_A_loss/len(word_array_A) * rd_loss_factor_A
 
 
         # Total loss
-        loss_G = loss_identity_A + loss_identity_B + loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB + rd_loss + rd_A_loss
+        loss_G = loss_identity_A + loss_identity_B + loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB
+        if use_rd:
+            loss_G += rd_loss
+            if use_rd_A:
+                loss_G += rd_A_loss
         loss_G.backward()
         
         optimizer_G.step()
         ###################################
-        if loss_G < lowest_G_loss:
-            if epoch > 2:
-                torch.save(netG_A2B.state_dict(),
-                           '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/' + str(save_number) + '/best/netG_A2B.pth')
-                torch.save(netG_B2A.state_dict(),
-                           '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/' + str(save_number) + '/best/netG_B2A.pth')
-                rd.saveModel(str(save_number) + '/best/rd.pt', model_path='/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/')
-            lowest_G_loss = loss_G
+
+
+
         ###### Discriminator A ######
         optimizer_D_A.zero_grad()
 
@@ -351,43 +378,69 @@ for epoch in range(opt.epoch, opt.n_epochs):
         ###################################
         count += 1
 
-        # if count == len(dataloader) or (epoch < 5 and count % (len(dataloader) // 10) == 0):
-        #     aba = np.concatenate((real_A.detach().squeeze(0).permute(1,2,0).cpu().numpy(), fake_B.detach().squeeze(0).permute(1,2,0).cpu().numpy(), recovered_A.detach().squeeze(0).permute(1,2,0).cpu().numpy()), axis=1) *255
-        #     bab = np.concatenate((real_B.detach().squeeze(0).permute(1, 2, 0).cpu().numpy(),
-        #                           fake_A.detach().squeeze(0).permute(1, 2, 0).cpu().numpy(),
-        #                           recovered_B.detach().squeeze(0).permute(1, 2, 0).cpu().numpy()), axis=1) * 255
-        #     cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/results/ABA_' + str(epoch) + '_' + str(count) + '.png', aba)
-        #     cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/results/BAB_' + str(epoch) + '_' + str(count) + '.png', bab)
 
-            # Progress report (http://localhos
-            # Progress report (http://localhost:8097)
-        try:
-            logger.log({'loss_G': loss_G, 'loss_G_identity': (loss_identity_A + loss_identity_B),
-                        'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A),
-                        'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB), 'loss_D': (loss_D_A + loss_D_B),
-                        'loss_RD': (rd_loss + rd_A_loss) }, images={})
+        log_dict = {'loss_G': loss_G, 'loss_G_identity': (loss_identity_A + loss_identity_B),
+                    'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A),
+                    'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB), 'loss_D': (loss_D_A + loss_D_B) }
 
-            if count % 5 == 1:
-                np_img = fake_B.detach().squeeze(0).permute(1, 2, 0).cpu().numpy()
-                cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/fake_B2.png', np_img * 255)
-                wandb.log({'loss_G': loss_G, 'loss_G_identity': (loss_identity_A + loss_identity_B), 'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A),
-                        'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB), 'loss_D': (loss_D_A + loss_D_B), 'loss_RD': rd_loss, 'loss_A_RD': rd_A_loss,
-                          'loss_identity_A': loss_identity_A, 'loss_identity_B': loss_identity_B,
-                          'loss_GAN_A2B': loss_GAN_A2B, 'loss_GAN_B2A' : loss_GAN_B2A,
-                          'loss_cycle_ABA': loss_cycle_ABA, 'loss_cycle_BAB' : loss_cycle_BAB,
-                          'loss_D_A': (loss_D_A), 'loss_D_B': loss_D_B,
-                        'A -> B -> A': [wandb.Image(real_A,  caption='real_A'), wandb.Image(fake_B, caption='fake_B'), wandb.Image(recovered_A, caption='recovered_A') ],
-                        'B -> A -> B': [wandb.Image(real_B,  caption='real_B'), wandb.Image(fake_A, caption='fake_A'),  wandb.Image(recovered_B, caption='recovered_B')]})
+
+        if use_rd:
+            if use_rd_A:
+                log_dict.update({'loss_RD_all': (rd_loss + rd_A_loss)})
+                try:
+                    logger.log(log_dict, images={})
+                except:
+                    print('Log')
+                log_dict.update({'loss_A_RD': rd_A_loss})
+
             else:
-                wandb.log({'loss_G': loss_G, 'loss_G_identity': (loss_identity_A + loss_identity_B), 'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A),
-                        'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB), 'loss_D': (loss_D_A + loss_D_B), 'loss_RD': rd_loss, 'loss_A_RD': rd_A_loss,
-                          'loss_identity_A': loss_identity_A, 'loss_identity_B': loss_identity_B,
-                          'loss_GAN_A2B': loss_GAN_A2B, 'loss_GAN_B2A' : loss_GAN_B2A,
-                          'loss_cycle_ABA': loss_cycle_ABA, 'loss_cycle_BAB' : loss_cycle_BAB,
-                          'loss_D_A': (loss_D_A), 'loss_D_B': loss_D_B})
+                log_dict.update({'loss_RD_all': rd_loss})
+                try:
+                    logger.log(log_dict, images={})
+                except:
+                    print('Log')
+            log_dict.update({'loss_RD': rd_loss})
+            if count == 1:  # (len(dataloader)-1): todo: change
+                cer_path, cer_beam, wer_path, wer_beam, cer_beam_clean_hist, wer_beam_clean_hist = rd.testOnHistorical(forceLower)
+                log_dict.update({'CERp': cer_path, 'CERb': cer_beam, 'WERp': wer_path, 'WERb': wer_beam, 'CERbeam_clean_hist': cer_beam_clean_hist, 'WERbeam_clean_hist': wer_beam_clean_hist})
+                if cer_beam < lowest_CER:
+                    torch.save(netG_A2B.state_dict(),
+                               '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/' + str(
+                                   save_number) + '/best/netG_A2B.pth')
+                    torch.save(netG_B2A.state_dict(),
+                               '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/' + str(
+                                   save_number) + '/best/netG_B2A.pth')
+                    if use_rd:
+                        rd.saveModel(str(save_number) + '/best/rd.pt',
+                                     model_path='/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/')
+                    lowest_CER = cer_beam
+                    print('Best CER on epoch: ' + str(epoch))
+        else:
+            logger.log(log_dict, images={})
 
-        except:
-            print('Loss error')
+        log_dict.update({
+                         'loss_identity_A': loss_identity_A, 'loss_identity_B': loss_identity_B,
+                         'loss_GAN_A2B': loss_GAN_A2B, 'loss_GAN_B2A': loss_GAN_B2A,
+                         'loss_cycle_ABA': loss_cycle_ABA, 'loss_cycle_BAB': loss_cycle_BAB,
+                         'loss_D_A': (loss_D_A), 'loss_D_B': loss_D_B})
+
+
+
+
+        if count % (10 + epoch) == 1:
+            # np_img = fake_B.detach().squeeze(0).permute(1, 2, 0).cpu().numpy()
+            # cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/fake_B2.png', np_img * 255)
+
+            log_dict.update({
+             'A -> B -> A': [wandb.Image(real_A, caption='real_A'), wandb.Image(fake_B, caption='fake_B'),
+                             wandb.Image(recovered_A, caption='recovered_A')],
+             'B -> A -> B': [wandb.Image(real_B, caption='real_B'), wandb.Image(fake_A, caption='fake_A'),
+                             wandb.Image(recovered_B, caption='recovered_B')]})
+
+
+        wandb.log(log_dict)
+
+
 
     # Update learning rates
     lr_scheduler_G.step()
@@ -417,19 +470,32 @@ for epoch in range(opt.epoch, opt.n_epochs):
     #                     # rd.getResult(tens.squeeze(0))
     #                     # print(loss)
     #         rd_hist.testOnHistorical()
-
     # Save models checkpoints
+
+
+    if epoch == 2 or epoch == 5 or ((epoch % 10) == 0 and not epoch == 0):
+        os.mkdir('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/' + str(save_number) + '/' + str(epoch))
+        torch.save(netG_A2B.state_dict(),
+                   '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/' + str(save_number) + '/' + str(epoch) + '/netG_A2B.pth')
+        torch.save(netG_B2A.state_dict(),
+                   '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/' + str(save_number) + '/' + str(epoch) + '/netG_B2A.pth')
+    if resetRD:
+        if epoch == 20:
+            if use_rd:
+                rd.loadModel(str(save_number) + '/rd_0.pt',
+                             model_path='/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/')
+
+    lowest_G_loss = loss_G
     torch.save(netG_A2B.state_dict(), '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/' + str(save_number) + '/netG_A2B.pth')
     # torch.save(model.state_dict(), os.path.join(wandb.run.dir, 'model.pt'))
     torch.save(netG_B2A.state_dict(), '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/' + str(save_number) + '/netG_B2A.pth')
     torch.save(netD_A.state_dict(), '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/' + str(save_number) + '/netD_A.pth')
     torch.save(netD_B.state_dict(), '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/' + str(save_number) + '/netD_B.pth')
-    rd.saveModel( str(save_number) + '/rd.pt', model_path= '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/')
+    if use_rd:
+        rd.saveModel( str(save_number) + '/rd.pt', model_path= '/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/')
     wandb.save('latest.pth')
-    
-    #generateCrops(3, '/home/manuel/CycleGANRD/PyTorch-CycleGAN/datasets/cropped_data/', just_generate=True, crop_path='train/A/')
 
-    dataloader = DataLoader(ImageDataset(opt.dataroot, transforms_=transforms_, unaligned=True),
-                            batch_size=opt.batchSize, shuffle=True, num_workers=opt.n_cpu)
+    if regenerate:
+        dataloader = DataLoader(ImageDataset(opt.dataroot, transforms_=transforms_, unaligned=True, source_dataset= opt.source_dataset), batch_size=opt.batchSize, shuffle=True, num_workers=opt.n_cpu)
 ###################################
 

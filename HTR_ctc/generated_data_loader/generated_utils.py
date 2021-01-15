@@ -6,8 +6,13 @@ import time
 import numpy as np
 import torch
 import cv2
+from torch.autograd import Variable
+from torchvision.transforms import transforms
+
 from HTR_ctc.utils.auxilary_functions import image_resize
 from .generated_config import *
+from .models import Generator
+
 
 bounding_box = 256
 delimiter = '$'
@@ -18,9 +23,9 @@ delimiter = '$'
 # |    x1,y1|
 #  _________
 
-def getWordsInCrop(name, source, x0, y0, x1, y1):
+def getWordsInCrop(name, source, x0, y0, x1, y1, source_dataset):
 
-    scope_tolerance = bounding_box * 0.03 # normally try 0.05
+    scope_tolerance = bounding_box * 0.01 # normally try 0.05
     # print('x0: ' + str(x0) + ' y0: ' + str(y0) + 'x1: ' + str(x1) + ' y1: ' + str(y1))
     csvCrop = open(source + 'csv-crop/' + name + '-crop.csv', 'w+')
     word = ""
@@ -37,7 +42,7 @@ def getWordsInCrop(name, source, x0, y0, x1, y1):
     hasWord = False # Variable that is returned determinating if the crop contain a word (It could also be a crop thats is only a lettrine)
     csvCrop.write(
         'word' + delimiter + 'x0' + delimiter + 'y0' + delimiter + 'x1' + delimiter + 'y1' + delimiter + 'y_scope_out' + delimiter + 'pre' + delimiter + 'post\n')
-    with open('/home/manuel/CycleGANRD/HTR_ctc/data/generated/csv/' + name + '.csv') as csvfile:
+    with open(data_path + source_dataset + '-csv/' + name + '.csv') as csvfile:
         reader = csv.DictReader(csvfile, delimiter=delimiter)
         for row in reader:
             wordOver = False
@@ -141,7 +146,7 @@ def pfloat(number): # positive float
 
 
 
-def getRandomCrop(image, image_name, source):
+def getRandomCrop(image, image_name, source, source_dataset):
     boundingBox_size = 256
     hasWords = False
     while True:
@@ -152,7 +157,7 @@ def getRandomCrop(image, image_name, source):
         #image = tf.image.crop_to_bounding_box(image, rand_y, rand_x, boundingBox_size, boundingBox_size)
         croppedImage = image[rand_y: rand_y + boundingBox_size, rand_x: rand_x + boundingBox_size,:]
         hasWords, csvCropString = getWordsInCrop(image_name.rsplit('.')[0], source, rand_x, rand_y, rand_x + boundingBox_size,
-                                       rand_y + boundingBox_size)
+                                       rand_y + boundingBox_size, source_dataset)
         if np.mean(croppedImage) < 230 and hasWords:  # recrop if picture is too white (not enough text)
             break
 
@@ -175,33 +180,50 @@ def resizeImg(img, fixed_size , order=1):
         img = torch.Tensor(img).float().unsqueeze(0)
         return img
 
-def generateCrops(nr_of_channels, source, just_generate = False, crop_path = 'train/A/', normalize=True):
+def generateCrops(nr_of_channels, source, just_generate = False, crop_path = 'train/A/', normalize=True, generator_path='',  source_dataset = 'EG-BG-LC'):
     print('Creating new crops')
     data = []
     image_count = 0
-    for image_name in data_image_names:
+    transforms_ = [transforms.ToTensor()]
+    transform = transforms.Compose(transforms_)
+
+    if generator_path != '':
+        Tensor = torch.cuda.FloatTensor
+        input_A = Tensor(1, 3, 256, 256)
+        netG_A2B = Generator(3, 3)
+        netG_A2B.cuda()
+        netG_A2B.load_state_dict(torch.load(generator_path))
+
+    all_image_names = os.listdir(data_path + source_dataset)
+    for image_name in all_image_names:
         if image_name[-1].lower() == 'g':  # to avoid e.g. thumbs.db files
             if nr_of_channels == 1:  # Gray scale image -> MR image
-                image = cv2.imread(os.path.join(data_path, image_name), cv2.IMREAD_GRAYSCALE)
+                image = cv2.imread(os.path.join(data_path + source_dataset, image_name), cv2.IMREAD_GRAYSCALE)
                 # todo: change data loader to delete one dimension in black and white, then delete squeeze in get
                 if not just_generate:
                     image = cv2.normalize(image, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
                 image = image[:, :, np.newaxis]
             else:  # RGB image -> street view
-                image = cv2.imread(os.path.join(data_path, image_name))
+                image = cv2.imread(os.path.join(data_path + source_dataset, image_name))
                 if not just_generate:
                     image = cv2.normalize(image, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
 
-            image, csvCropString = getRandomCrop(image, image_name, source)
+            image, csvCropString = getRandomCrop(image, image_name, source, source_dataset)
+            if generator_path != '':
+                real_A = Variable(input_A.copy_(transform(image)))
+                image = (netG_A2B(real_A).data)
+
             if just_generate:
-                #cv2.imwrite(source + crop_path + image_name.rsplit('.')[0] + '-crop.png', image)
                 data.append([image.copy(), csvCropString])
             else:
                 word_array, info_array = cropWords(image, image_name.rsplit('.')[0] + '-crop',
                                                    source)
                 for i in range(0, len(word_array)):
-                    data.append([word_array[i].copy(), info_array[i]])
+                    if len(word_array[i].shape) == 3:
+                        _, w, _ = word_array[i].shape
+                        if w > 1:
+                            data.append([word_array[i].copy(), info_array[i]])
             t3 = time.time()
         image_count += 1
         if image_count % (len(data_image_names) // 10) == 1:

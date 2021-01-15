@@ -32,10 +32,13 @@ netG_A2B.load_state_dict(torch.load('/home/manuel/CycleGANRD/HTR_ctc/saved_model
 
 # crops = generateCrops(3, '/home/manuel/CycleGANRD/PyTorch-CycleGAN/datasets/cropped_data/', just_generate=True,
 #                              crop_path='train/A/')
+transform = transforms.Compose(transforms_)
 
-
-
-
+item_A = transform(cv2.normalize(cv2.imread('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/questions2.png'), None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F))
+real_A = Variable(input_A.copy_(item_A))
+fake_B = (netG_A2B(real_A).data)
+np_img = fake_B.detach().squeeze(0).permute(1, 2, 0).cpu().numpy() * 255
+cv2.imwrite('/home/manuel/CycleGANRD/PyTorch-CycleGAN/output/questionTrans.png', np_img)
 rd.loadModel('Only_gen3.pt')
 bool = rd.testOnHistorical()
 bool = False

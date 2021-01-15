@@ -10,14 +10,14 @@ from HTR_ctc.generated_data_loader.generated_utils import *
 
 #todo: store all pictures, word crops and info in dataloader
 class ImageDataset(Dataset):
-    def __init__(self, root, transforms_=None, unaligned=False, mode='train'):
+    def __init__(self, root, transforms_=None, unaligned=False, mode='train', source_dataset = 'EG-BG-LC'):
         self.files_A = []
         self.files_B = []
         self.transform = transforms.Compose(transforms_)
         self.unaligned = unaligned
         self.mode = mode
 
-        self.crops_A =  generateCrops(3, '/home/manuel/CycleGANRD/PyTorch-CycleGAN/datasets/cropped_data/', just_generate=True, crop_path='train/A/')
+        self.crops_A =  generateCrops(3, '/home/manuel/CycleGANRD/HTR_ctc/data/generated/' , just_generate=True, crop_path='train/A/', source_dataset= source_dataset)
 
         self.files_B_name = sorted(glob.glob(os.path.join(root, '%s/B' % mode) + '/*.*'))
 
@@ -41,7 +41,7 @@ class ImageDataset(Dataset):
             return {'B': item_B, 'B_name': name_B}
 
     def __len__(self):
-        return max(len(self.crops_A), len(self.files_B_name))
+        return len(self.files_B_name)
     
     def __lenA__(self):
         return len(self.crops_A)
